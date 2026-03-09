@@ -1,0 +1,34 @@
+.vs/
+
+# CMake
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.cmake
+!cmake/
+
+# vcpkg
+vcpkg_installed/
+
+# Visual Studio
+*.sdf
+*.suo
+*.v12.suo
+*.VC.db
+*.VC.opendb
+*.user
+*.ncb
+*.aps
+ipch/
+x64/
+x86/
+Debug/
+Release/
+
+# Binaries
+*.pdb
+*.ilk
+*.exp
+*.exe

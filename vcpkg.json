@@ -1,0 +1,12 @@
+{
+  "name": "litecad",
+  "version": "1.0.0",
+  "description": "3D Triangle Mesh Simplification/Reconstruction",
+  "dependencies": [
+    {
+      "name": "cgal",
+      "default-features": false
+    },
+    "eigen3"
+  ]
+}
