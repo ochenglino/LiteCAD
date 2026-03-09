@@ -23,7 +23,7 @@ $<VCPKG_ROOT>\vcpkg.exe install --triplet x64-windows
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE="$<VCPKG_ROOT>\scripts\buildsystems\vcpkg.cmake" -A x64
 
 # compilation
---build build --config Release
+cmake --build build --config Release
 ```
 The output LiteCAD.exe will be in the folder ``` /build/src/Release```
 
