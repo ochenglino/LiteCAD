@@ -31,7 +31,7 @@ The output LiteCAD.exe will be in the folder ``` /build/src/Release```
 After the project is successfully built, you can easily use it from the command line, as follows:
 ```
 LiteCAD.exe <INPUT> <OUTPUT> <SIZE> <FACTOR_OF_DECAY> <FACTOR_FOR_PARTICLE_SYSTEM>
-# example: LiteCAD.exe data/bunny.obj data 1000 0.95 0.3 
+# example: LiteCAD.exe ../../../data/bunny.obj ../../../data 1000 0.95 0.3 
 ```
 It is worth noting that we recommend setting the decay factor and particle system factor to 0.95 and 0.3 respectively if you want to achieve the desired mesh simplification effect.
 
