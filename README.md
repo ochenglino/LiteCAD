@@ -38,6 +38,6 @@ It is worth noting that we recommend setting the decay factor and particle syste
 ## Citation
 If this code contributes to academic work, please cite as:
 ```
-ddd
+
 ```
 
