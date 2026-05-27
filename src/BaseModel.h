@@ -57,6 +57,10 @@ protected:
 	vector<CPoint3D> m_NormalsToVerts;
 	vector<CPoint3D> m_NormalsToFaces;
 	vector<double> m_TriangleAreas;
+	vector<double> m_PrincipalKMin;
+	vector<double> m_PrincipalKMax;
+	vector<CPoint3D> m_PrincipalDirMin;
+	vector<CPoint3D> m_PrincipalDirMax;
 	set<int> m_UselessFaces;
 	string m_filename;	
 	double m_scale;
@@ -71,9 +75,14 @@ protected:
 	
 public:
 	void BuildVertexToFaceMapping();
+	void ComputePrincipalCurvaturesAndDirections();
 	const std::vector<int>& GetFacesFromVertex(int vertIndex) const;
 	const double GetAreaOfTriangle(int faceIndex) const;
 	const CPoint3D& GetFaceNormal(int faceIndex) const;
+	double GetPrincipalCurvatureMin(int vertIndex) const;
+	double GetPrincipalCurvatureMax(int vertIndex) const;
+	const CPoint3D& GetPrincipalDirectionMin(int vertIndex) const;
+	const CPoint3D& GetPrincipalDirectionMax(int vertIndex) const;
 	virtual void LoadModel();
 	void ComputeScaleAndNormals();
 	int GetVertexID(const CPoint3D& pt) const;
@@ -126,6 +135,26 @@ const CPoint3D& CBaseModel::Normal(int vertIndex) const
 const CPoint3D& CBaseModel::NormalOfFace(int faceIndex) const
 {
 	return m_NormalsToFaces[faceIndex];
+}
+
+double CBaseModel::GetPrincipalCurvatureMin(int vertIndex) const
+{
+	return m_PrincipalKMin[vertIndex];
+}
+
+double CBaseModel::GetPrincipalCurvatureMax(int vertIndex) const
+{
+	return m_PrincipalKMax[vertIndex];
+}
+
+const CPoint3D& CBaseModel::GetPrincipalDirectionMin(int vertIndex) const
+{
+	return m_PrincipalDirMin[vertIndex];
+}
+
+const CPoint3D& CBaseModel::GetPrincipalDirectionMax(int vertIndex) const
+{
+	return m_PrincipalDirMax[vertIndex];
 }
 const CBaseModel::CFace& CBaseModel::Face(int faceIndex) const
 {

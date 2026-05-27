@@ -54,6 +54,7 @@ struct EvaluateWorkspace
     std::vector<std::vector<std::pair<Point, int>>> closetPointsSet;
 
     std::vector<std::set<int>> gtClosetTrianglesSet;
+    std::vector<int> projectedTriangleIds;
 
     std::vector<double> grad_x;
     std::vector<double> grad_y;
@@ -69,6 +70,7 @@ struct EvaluateWorkspace
         pointsForKdTree.resize(nSamples);
         closetPointsSet.resize(nSamples);
         gtClosetTrianglesSet.resize(nSamples);
+        projectedTriangleIds.resize(nSamples, -1);
         grad_x.resize(nSamples, 0.0);
         grad_y.resize(nSamples, 0.0);
         grad_z.resize(nSamples, 0.0);
@@ -91,6 +93,7 @@ struct EvaluateWorkspace
         {
             closetPointsSet[i].clear();
             gtClosetTrianglesSet[i].clear();
+            projectedTriangleIds[i] = -1;
             grad_x[i] = 0.0;
             grad_y[i] = 0.0;
             grad_z[i] = 0.0;
@@ -135,4 +138,3 @@ protected:
 
     vector<std::pair<Point, int>> GetclosetNeighorPoints(ANNkd_tree* kdTree, Point queryPoint, double sigma, const vector<Point>& pointsForKdTree) const;
 };
-

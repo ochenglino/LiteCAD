@@ -10,7 +10,47 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <cmath>
+#include <Eigen/Dense>
 using namespace std;
+
+namespace
+{
+	constexpr double kEpsilonTolerance = 1e-12;
+	constexpr double kMinDeterminantThreshold = 1e-18;
+
+	bool NormalizeSafe(CPoint3D& v)
+	{
+		const double len = v.Len();
+		if (len <= kEpsilonTolerance)
+		{
+			return false;
+		}
+		v /= len;
+		return true;
+	}
+
+	void BuildTangentFrameFromNormal(const CPoint3D& normalUnit, CPoint3D& t1, CPoint3D& t2)
+	{
+		CPoint3D axis = (std::fabs(normalUnit.x) < 0.9) ? CPoint3D(1.0, 0.0, 0.0) : CPoint3D(0.0, 1.0, 0.0);
+		t1 = axis * normalUnit;
+		if (!NormalizeSafe(t1))
+		{
+			axis = CPoint3D(0.0, 0.0, 1.0);
+			t1 = axis * normalUnit;
+			if (!NormalizeSafe(t1))
+			{
+				t1 = CPoint3D(1.0, 0.0, 0.0);
+			}
+		}
+
+		t2 = normalUnit * t1;
+		if (!NormalizeSafe(t2))
+		{
+			t2 = CPoint3D(0.0, 1.0, 0.0);
+		}
+	}
+}
 
 
 //////////////////////////////////////////////////////////////////////
@@ -204,11 +244,142 @@ void CBaseModel::ComputeScaleAndNormals()
 	//m_center = center;
 	//m_ptUp = ptUp;
 	//m_ptDown = ptDown;
+
+	ComputePrincipalCurvaturesAndDirections();
 }
 
 const CPoint3D& CBaseModel::GetFaceNormal(int faceIndex) const
 {
 	return m_NormalsToFaces[faceIndex];
+}
+
+void CBaseModel::ComputePrincipalCurvaturesAndDirections()
+{
+	const int numVerts = GetNumOfVerts();
+	m_PrincipalKMin.assign(numVerts, 0.0);
+	m_PrincipalKMax.assign(numVerts, 0.0);
+	m_PrincipalDirMin.assign(numVerts, CPoint3D(1.0, 0.0, 0.0));
+	m_PrincipalDirMax.assign(numVerts, CPoint3D(0.0, 1.0, 0.0));
+
+	if (numVerts == 0)
+	{
+		return;
+	}
+
+	if (m_vertToFaces.empty())
+	{
+		BuildVertexToFaceMapping();
+	}
+
+	for (int i = 0; i < numVerts; ++i)
+	{
+		CPoint3D n = Normal(i);
+		if (!NormalizeSafe(n))
+		{
+			n = CPoint3D(0.0, 0.0, 1.0);
+		}
+
+		CPoint3D t1, t2;
+		BuildTangentFrameFromNormal(n, t1, t2);
+
+		std::set<int> neighbors;
+		const std::vector<int>& incidentFaces = GetFacesFromVertex(i);
+		for (int faceId : incidentFaces)
+		{
+			const CFace& f = Face(faceId);
+			for (int k = 0; k < 3; ++k)
+			{
+				if (f[k] != i)
+				{
+					neighbors.insert(f[k]);
+				}
+			}
+		}
+
+		if (neighbors.size() < 3)
+		{
+			m_PrincipalDirMin[i] = t1;
+			m_PrincipalDirMax[i] = t2;
+			continue;
+		}
+
+		Eigen::Matrix3d ata = Eigen::Matrix3d::Zero();
+		Eigen::Vector3d atb = Eigen::Vector3d::Zero();
+		int validCount = 0;
+
+		const CPoint3D& vi = Vert(i);
+		for (int nbr : neighbors)
+		{
+			const CPoint3D d = Vert(nbr) - vi;
+			const double u = d ^ t1;
+			const double v = d ^ t2;
+			const double w = d ^ n;
+			if (std::fabs(u) + std::fabs(v) <= kEpsilonTolerance)
+			{
+				continue;
+			}
+
+			Eigen::Vector3d row(0.5 * u * u, u * v, 0.5 * v * v);
+			ata += row * row.transpose();
+			atb += row * w;
+			++validCount;
+		}
+
+		if (validCount < 3 || std::fabs(ata.determinant()) <= kMinDeterminantThreshold)
+		{
+			m_PrincipalDirMin[i] = t1;
+			m_PrincipalDirMax[i] = t2;
+			continue;
+		}
+
+		// ata is symmetric normal-equation matrix; LDLT is stable and efficient for this case.
+		const Eigen::Vector3d coeff = ata.ldlt().solve(atb);
+		if (!coeff.allFinite())
+		{
+			m_PrincipalDirMin[i] = t1;
+			m_PrincipalDirMax[i] = t2;
+			continue;
+		}
+
+		Eigen::Matrix2d hessian;
+		hessian << coeff[0], coeff[1],
+			coeff[1], coeff[2];
+		Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> eig(hessian);
+		if (eig.info() != Eigen::Success)
+		{
+			m_PrincipalDirMin[i] = t1;
+			m_PrincipalDirMax[i] = t2;
+			continue;
+		}
+
+		const Eigen::Vector2d evals = eig.eigenvalues();
+		const Eigen::Matrix2d evecs = eig.eigenvectors();
+		m_PrincipalKMin[i] = evals[0];
+		m_PrincipalKMax[i] = evals[1];
+
+		CPoint3D vMin = t1 * evecs(0, 0) + t2 * evecs(1, 0);
+		CPoint3D vMax = t1 * evecs(0, 1) + t2 * evecs(1, 1);
+
+		vMin -= n * (vMin ^ n);
+		if (!NormalizeSafe(vMin))
+		{
+			vMin = t1;
+		}
+
+		vMax -= n * (vMax ^ n);
+		vMax -= vMin * (vMax ^ vMin);
+		if (!NormalizeSafe(vMax))
+		{
+			vMax = n * vMin;
+			if (!NormalizeSafe(vMax))
+			{
+				vMax = t2;
+			}
+		}
+
+		m_PrincipalDirMin[i] = vMin;
+		m_PrincipalDirMax[i] = vMax;
+	}
 }
 
 void CBaseModel::LoadModel()

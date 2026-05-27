@@ -1,6 +1,43 @@
 #include "Inputed_Triangle_Mesh_Reconstruction.h"
+#include <cmath>
+#include <cfloat>
 
 #pragma comment(lib, "ANN.lib")
+
+namespace
+{
+	bool NormalizeSafe(CPoint3D& v)
+	{
+		const double len = v.Len();
+		if (len <= 1e-12)
+		{
+			return false;
+		}
+		v /= len;
+		return true;
+	}
+
+	void BuildTangentFrameFromNormal(const CPoint3D& normalUnit, CPoint3D& t1, CPoint3D& t2)
+	{
+		CPoint3D axis = (std::fabs(normalUnit.x) < 0.9) ? CPoint3D(1.0, 0.0, 0.0) : CPoint3D(0.0, 1.0, 0.0);
+		t1 = axis * normalUnit;
+		if (!NormalizeSafe(t1))
+		{
+			axis = CPoint3D(0.0, 0.0, 1.0);
+			t1 = axis * normalUnit;
+			if (!NormalizeSafe(t1))
+			{
+				t1 = CPoint3D(1.0, 0.0, 0.0);
+			}
+		}
+
+		t2 = normalUnit * t1;
+		if (!NormalizeSafe(t2))
+		{
+			t2 = CPoint3D(0.0, 1.0, 0.0);
+		}
+	}
+}
 
 Inputed_Triangle_Mesh_Reconstruction::Inputed_Triangle_Mesh_Reconstruction(CBaseModel& inputModel, int nSamples,
 	double factor_for_particle_system, double lambdaForBalance, double lambda_PS, double lambda_NA)
@@ -125,11 +162,14 @@ lbfgsfloatval_t Inputed_Triangle_Mesh_Reconstruction::evaluate(
 	m_workspace.reset(m_nSamples);
 
 	ParticleSoA& particles = m_workspace.particles;
+	auto& projectedTriangleIds = m_workspace.projectedTriangleIds;
 	//push points to the mesh 
 	#pragma omp parallel  for schedule(static)
 	for (int i = 0; i < m_nSamples; ++i)
 	{
-		CPoint3D closedPoint = m_obbtree.Query(CPoint3D(x[i * 3], x[i * 3 + 1], x[i * 3 + 2])).closestPnt;
+		Distance_OBB::QueryResult queryResult = m_obbtree.Query(CPoint3D(x[i * 3], x[i * 3 + 1], x[i * 3 + 2]));
+		CPoint3D closedPoint = queryResult.closestPnt;
+		projectedTriangleIds[i] = queryResult.triangleID;
 
 		particles.xs[i] = closedPoint.x;
 		particles.ys[i] = closedPoint.y;
@@ -201,6 +241,65 @@ lbfgsfloatval_t Inputed_Triangle_Mesh_Reconstruction::evaluate(
 		set<int> gtClosetTriangles = gtClosetTrianglesSet[i];
 		double gi0 = 0, gi1 = 0, gi2 = 0;
 
+		int mappedVert = -1;
+		const int triId = projectedTriangleIds[i];
+		if (triId >= 0 && triId < m_inputModel.GetNumOfFaces())
+		{
+			const CBaseModel::CFace& face = m_inputModel.Face(triId);
+			double bestDist2 = DBL_MAX;
+			for (int c = 0; c < 3; ++c)
+			{
+				const int vid = face[c];
+				const CPoint3D dv = m_inputModel.Vert(vid) - CPoint3D(xi, yi, zi);
+				const double dist2 = dv ^ dv;
+				if (dist2 < bestDist2)
+				{
+					bestDist2 = dist2;
+					mappedVert = vid;
+				}
+			}
+		}
+		if (mappedVert < 0)
+		{
+			mappedVert = m_inputModel.GetVertexID(CPoint3D(xi, yi, zi));
+		}
+
+		CPoint3D n = m_inputModel.Normal(mappedVert);
+		if (!NormalizeSafe(n))
+		{
+			n = CPoint3D(0.0, 0.0, 1.0);
+		}
+
+		CPoint3D vMin = m_inputModel.GetPrincipalDirectionMin(mappedVert);
+		CPoint3D vMax = m_inputModel.GetPrincipalDirectionMax(mappedVert);
+
+		vMin -= n * (vMin ^ n);
+		if (!NormalizeSafe(vMin))
+		{
+			BuildTangentFrameFromNormal(n, vMin, vMax);
+		}
+
+		vMax -= n * (vMax ^ n);
+		vMax -= vMin * (vMax ^ vMin);
+		if (!NormalizeSafe(vMax))
+		{
+			vMax = n * vMin;
+			if (!NormalizeSafe(vMax))
+			{
+				CPoint3D t1, t2;
+				BuildTangentFrameFromNormal(n, t1, t2);
+				vMin = t1;
+				vMax = t2;
+			}
+		}
+
+		const double kMin = m_inputModel.GetPrincipalCurvatureMin(mappedVert);
+		const double kMax = m_inputModel.GetPrincipalCurvatureMax(mappedVert);
+		const double scaleMin = (kMin > 0.0) ? std::sqrt(kMin) : 0.0;
+		const double scaleMax = (kMax > 0.0) ? std::sqrt(kMax) : 0.0;
+		const double scaleMinSquared = scaleMin * scaleMin;
+		const double scaleMaxSquared = scaleMax * scaleMax;
+
 		// Compute the particle system energy and its gradient
 		for (int j = 0; j < closetPoints.size(); ++j)
 		{
@@ -210,14 +309,19 @@ lbfgsfloatval_t Inputed_Triangle_Mesh_Reconstruction::evaluate(
 			double dist_x = xi - cx;
 			double dist_y = yi - cy;
 			double dist_z = zi - cz;
-			double  dist2 = dist_x * dist_x + dist_y * dist_y + dist_z * dist_z;
-			double  interParticlesEnergy = 1 / exp((dist2 * inv_4sigma2));
+			const CPoint3D d(dist_x, dist_y, dist_z);
+			const double projMin = d ^ vMin;
+			const double projMax = d ^ vMax;
+			const double quadraticForm = scaleMinSquared * projMin * projMin + scaleMaxSquared * projMax * projMax;
+
+			const double interParticlesEnergy = std::exp(-(quadraticForm * inv_4sigma2));
 			E_PS += m_lambda_PS * interParticlesEnergy;
 
-			double medialValue = interParticlesEnergy * inv_2sigma2;
-			gi0 += m_lambda_PS * medialValue * (cx - xi);
-			gi1 += m_lambda_PS * medialValue * (cy - yi);
-			gi2 += m_lambda_PS * medialValue * (cz - zi);
+			const CPoint3D qd = vMin * (scaleMin * projMin) + vMax * (scaleMax * projMax);
+			const double medialValue = interParticlesEnergy * inv_2sigma2;
+			gi0 += m_lambda_PS * medialValue * qd.x;
+			gi1 += m_lambda_PS * medialValue * qd.y;
+			gi2 += m_lambda_PS * medialValue * qd.z;
 
 		}
 
