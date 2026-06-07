@@ -1,5 +1,5 @@
 {
-  "name": "litecad",
+  "name": "liteMesh",
   "version": "1.0.0",
   "description": "3D Triangle Mesh Simplification/Reconstruction",
   "dependencies": [
